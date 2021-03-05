@@ -1,0 +1,7 @@
+PUT http://localhost:3001/api/notes/6041288af65db42f1476e17d
+Content-Type: application/json
+
+{
+    "content": "Your post was modified again 🐔",
+    "important": true
+}

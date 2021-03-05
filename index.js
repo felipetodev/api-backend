@@ -1,100 +1,110 @@
-const express = require('express')
-const cors = require('cors')
+require('dotenv').config()
+require('./mongo')
 
+const Sentry = require('@sentry/node')
+const Tracing = require('@sentry/tracing')
+const express = require('express')
 const app = express()
-const logger = require('./loggerMiddleware')
+const cors = require('cors')
+const Note = require('./models/Note')
+const notFound = require('./middleware/notFound')
+const handleErrors = require('./middleware/handleErrors')
 
 app.use(cors())
 app.use(express.json())
 
-app.use(logger)
+Sentry.init({
+  dsn: 'https://722feb3fdf3a49ca973c01e4cccf7faa@o542545.ingest.sentry.io/5662456',
+  integrations: [
+    // enable HTTP calls tracing
+    new Sentry.Integrations.Http({ tracing: true }),
+    // enable Express.js middleware tracing
+    new Tracing.Integrations.Express({ app })
+  ],
 
-let notes = [
-  {
-    id: 1,
-    content: "Let's do this!",
-    date: '2020-05-30T17:30:31.098Z',
-    important: true
-  },
-  {
-    id: 2,
-    content: 'Testing some Node things',
-    date: '2020-05-30T17:30:31.098Z',
-    important: false
-  },
-  {
-    id: 3,
-    content: 'Will be a mongodb database',
-    date: '2020-05-30T19:20:14.298Z',
-    important: true
-  }
-]
+  // We recommend adjusting this value in production, or using tracesSampler
+  // for finer control
+  tracesSampleRate: 1.0
+})
+
+// RequestHandler creates a separate execution context using domains, so that every
+// transaction/span/breadcrumb is attached to its own Hub instance
+app.use(Sentry.Handlers.requestHandler())
+// TracingHandler creates a trace for every incoming request
+app.use(Sentry.Handlers.tracingHandler())
 
 app.get('/', (req, res) => {
   res.send('<h1>Hello World</h1>')
 })
 
 app.get('/api/notes', (req, res) => {
-  res.json(notes)
+  Note.find({}).then(notes => {
+    res.json(notes)
+  })
 })
 
-app.get('/api/notes/:id', (req, res) => {
-  const id = Number(req.params.id)
-  const note = notes.find(note => note.id === id)
-
-  note ? res.json(note) : res.status(404).end()
+app.get('/api/notes/:id', (req, res, next) => {
+  const { id } = req.params
+  Note.findById(id)
+    .then(note => {
+      if (note) {
+        return res.json(note)
+      } else {
+        res.status(404).end()
+      }
+    })
+    .catch(err => next(err))
 })
 
-app.delete('/api/notes/:id', (req, res) => {
-  const id = Number(req.params.id)
-  notes = notes.filter(note => note.id !== id)
-  res.status(204).end()
-})
-
-app.post('/api/notes', (req, res) => {
+app.put('/api/notes/:id', (req, res, next) => {
+  const { id } = req.params
   const note = req.body
 
-  if (!note || !note.content) {
+  const newNoteInfo = {
+    content: note.content,
+    important: note.important
+  }
+
+  Note.findByIdAndUpdate(id, newNoteInfo, { new: true })
+    .then(result => res.status(200).json(result))
+    .catch(err => next(err))
+})
+
+app.delete('/api/notes/:id', (req, res, next) => {
+  const id = req.params.id
+
+  Note.findByIdAndRemove(id)
+    .then(() => res.status(204).end())
+    .catch(err => next(err))
+})
+
+app.post('/api/notes', (req, res, next) => {
+  const note = req.body
+
+  if (!note.content) {
     return res.status(400).json({
       error: 'note.content is missing'
     })
   }
 
-  const ids = notes.map(note => note.id)
-  const maxId = Math.max(...ids)
-
-  const newNote = {
-    id: maxId + 1,
+  const newNote = new Note({
     content: note.content,
-    important: typeof note.important !== 'undefined' ? note.important : false,
+    important: note.important || false,
     date: new Date().toISOString()
-  }
-
-  notes = notes.concat(newNote)
-
-  res.status(201).json(newNote)
-})
-
-app.use((req, res) => {
-  res.status(404).json({
-    error: 'Not found'
   })
+
+  newNote.save().then(savedNote => {
+    res.status(201).json(savedNote)
+  }).catch(err => next(err))
 })
 
-const PORT = process.env.PORT || 3001
+app.use(notFound)
+
+app.use(Sentry.Handlers.errorHandler())
+app.use(handleErrors)
+
+const PORT = process.env.PORT
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`)
 })
-
-/*
-const app = http.createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'application/json' })
-    res.end(JSON.stringify(notes))
-})
-
-const PORT = 3001
-
-app.listen(PORT)
-console.log(`Server running on port ${PORT}`)
-*/
