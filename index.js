@@ -9,6 +9,8 @@ const cors = require('cors')
 const Note = require('./models/Note')
 const notFound = require('./middleware/notFound')
 const handleErrors = require('./middleware/handleErrors')
+const usersRouter = require('./controllers/users')
+const User = require('./models/User')
 
 app.use(cors())
 app.use(express.json())
@@ -38,7 +40,10 @@ app.get('/', (req, res) => {
 })
 
 app.get('/api/notes', async (req, res) => {
-  const notes = await Note.find({})
+  const notes = await Note.find({}).populate('user', {
+    username: 1,
+    name: 1
+  })
   res.json(notes)
 })
 
@@ -79,27 +84,40 @@ app.delete('/api/notes/:id', async (req, res, next) => {
 })
 
 app.post('/api/notes', async (req, res, next) => {
-  const note = req.body
+  const {
+    content,
+    important = false,
+    userId
+  } = req.body
 
-  if (!note.content) {
+  const user = await User.findById(userId)
+
+  if (!content) {
     return res.status(400).json({
-      error: 'note.content is missing'
+      error: 'required "content" field is missing'
     })
   }
 
   const newNote = new Note({
-    content: note.content,
-    important: note.important || false,
-    date: new Date().toISOString()
+    content,
+    important,
+    date: new Date().toISOString(),
+    user: user._id
   })
 
   try {
     const savedNote = await newNote.save()
+
+    user.notes = user.notes.concat(savedNote._id)
+    await user.save()
+
     res.status(201).json(savedNote)
   } catch (err) {
     next(err)
   }
 })
+
+app.use('/api/users', usersRouter)
 
 app.use(notFound)
 

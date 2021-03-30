@@ -3,7 +3,8 @@ Content-Type: application/json
 
 {
     "content": "Created from MongoDB 😊",
-    "important": true
+    "important": true,
+    "userId": "60627711f7050c26b0e56b2f"
 }
 
 ###
